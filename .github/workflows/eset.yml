@@ -1,62 +1,69 @@
-name: Generator
+name: Test the project and update the test-date
 
 on:
+  schedule:
+    - cron: '0 */12 * * *'
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
-    inputs:
-      account:
-        description: 'Number of Accounts to be generated (default = 0)'
-        required: false
-        default: '0'
-      key:
-        description: 'Number of Keys to be generated (default = 1)'
-        required: false
-        default: '1'
-      mail:
-        description: 'Choose the mail provider to generate license'
-        required: true
-        type: choice
-        options:
-        - 1secmail
-        - hi2in
-        - 10minutemail
-        - guerrillamail
-        - developermail
-        default: developermail
 jobs:
-  GenerateKey:
+  Test:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate key
+      - name: 'Checkout Repo'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: 'Generate key and update the test time'
         run: |
-          ACCOUNT=${{ github.event.inputs.account }}
-          KEY=${{ github.event.inputs.key }}
-          MAIL=${{ github.event.inputs.mail }}
-          git clone https://github.com/rzc0d3r/ESET-KeyGen.git
+          ACCOUNT=0
+          KEY=1
+          SMALL_BUSINESS_KEY=1
+          EMAIL_API=mailticking
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git clone --depth 1 https://github.com/rzc0d3r/ESET-KeyGen.git
           cd ESET-KeyGen
           sudo apt update
           sudo apt install python3-pip
           sudo pip install -r requirements.txt
-          if [[ (${ACCOUNT} != 0) && (${KEY} != 0) ]]
-          then
-          (seq 1 $((ACCOUNT)) | xargs -I {} -P $((ACCOUNT)) python3 main.py --chrome --account --email-api ${MAIL} --skip-webdriver-menu --skip-update-check) & (seq 1 $((KEY)) | xargs -I {} -P $((KEY)) python3 main.py --chrome --key --email-api ${MAIL} --skip-webdriver-menu --skip-update-check)
-          echo "Account:" >> $GITHUB_STEP_SUMMARY
-          cat ./*ACCOUNTS.txt >> $GITHUB_STEP_SUMMARY
-          echo -e "\nKey:" >> $GITHUB_STEP_SUMMARY
-          cat ./*KEYS.txt >> $GITHUB_STEP_SUMMARY
-          exit
-          fi
-          
+          echo "Test results:" >> $GITHUB_STEP_SUMMARY
           if [[ ${ACCOUNT} != 0 ]]
           then
-          seq 1 $((ACCOUNT)) | xargs -I {} -P $((ACCOUNT)) python3 main.py --chrome --account --email-api ${MAIL} --skip-webdriver-menu --skip-update-check
-          echo -e "\nAccount:" >> $GITHUB_STEP_SUMMARY
+          for ((attempt=1;attempt<=${ACCOUNT};++attempt))
+          do
+          python3 main.py --chrome --account --email-api ${EMAIL_API} --skip-update-check --no-logo --disable-progress-bar
+          done
+          echo -e "\nAccounts generated:" >> $GITHUB_STEP_SUMMARY
           cat ./*ACCOUNTS.txt >> $GITHUB_STEP_SUMMARY
           fi
-          
+          if [[ ${KEY} != 0 && ${SMALL_BUSINESS_KEY} != 0 ]]
+          then
           if [[ ${KEY} != 0 ]]
           then
-          seq 1 $((KEY)) | xargs -I {} -P $((KEY)) python3 main.py --chrome --key --email-api ${MAIL} --skip-webdriver-menu --skip-update-check
-          echo -e "\nKey:" >> $GITHUB_STEP_SUMMARY
+          for ((attempt=1;attempt<=${KEY};++attempt))
+          do
+          python3 main.py --chrome --key --email-api ${EMAIL_API} --skip-update-check --no-logo --disable-progress-bar
+          done
+          fi
+          if [[ ${SMALL_BUSINESS_KEY} != 0 ]]
+          then
+          for ((attempt=1;attempt<=${SMALL_BUSINESS_KEY};++attempt))
+          do
+          python3 main.py --chrome --small-business-key --email-api ${EMAIL_API} --skip-update-check --no-logo --disable-progress-bar
+          done
+          fi
+          echo -e "\nKeys generated:" >> $GITHUB_STEP_SUMMARY
           cat ./*KEYS.txt >> $GITHUB_STEP_SUMMARY
           fi
+          echo 
+          cd ${{ github.workspace }}
+          sed -i '/^ESET-KeyGen - Trial-Key & Account generator/ c\ESET-KeyGen - Trial-Key & Account generator for ESET Antivirus (last test was on '"$(date -u --date='3 hours' +"%d.%m.%Y at %H:%M UTC+3")"')' README.md
+          sudo rm -r ESET-KeyGen
+          git pull
+          git commit -m "Update test time" -a
+      - name: Push changes to the repo
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.PAT }}
+          branch: ${{ github.ref }}
