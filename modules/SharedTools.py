@@ -2,6 +2,15 @@ from selenium.webdriver import Chrome, ChromeOptions, ChromeService
 from selenium.webdriver import Firefox, FirefoxOptions, FirefoxService
 from selenium.webdriver import Edge, EdgeOptions, EdgeService
 
+import logging
+
+logger = logging.getLogger('selenium')
+logger.setLevel(logging.DEBUG)
+handler = logging.FileHandler('selenium-logs.txt')
+logger.addHandler(handler)
+logging.getLogger('selenium.webdriver.remote').setLevel(logging.WARN)
+logging.getLogger('selenium.webdriver.common').setLevel(logging.DEBUG)
+
 import traceback
 import colorama
 import random
@@ -18,12 +27,19 @@ GET_EBID = 'document.getElementById'
 GET_EBTN = 'document.getElementByTagName'
 GET_EBAV = 'getElementByAttrValue'
 CLICK_WITH_BOOL = 'clickWithBool'
-PARSE_10MINUTEMAIL_INBOX = 'parse_10minutemail_inbox()'
 DEFINE_GET_EBAV_FUNCTION = """
-function getElementByAttrValue(tagName, attrName, attrValue) {
+function getElementByAttrValue(tagName, attrName, attrValue, index=1) {
+    let eindex = 0
+    let elements = []
     for (let element of document.getElementsByTagName(tagName)) {
-        if(element.getAttribute(attrName) === attrValue)
-            return element } }"""
+        if(element.getAttribute(attrName) === attrValue) {
+            eindex += 1
+            if (index == -1)
+                elements.push(element)
+            else if (index == eindex)
+                return element } } 
+    if (index == -1)    
+        return elements }"""
 DEFINE_CLICK_WITH_BOOL_FUNCTION = """
 function clickWithBool(object) {
     try {
@@ -31,36 +47,6 @@ function clickWithBool(object) {
         return true }
     catch {
         return false } }"""
-DEFINE_PARSE_10MINUTEMAIL_INBOX_FUNCTION = """function parse_10minutemail_inbox() {
-    updatemailbox()
-    let mails = Array.from(document.getElementsByTagName('tr')).slice(1)
-    let inbox = []
-    for(let i=0; i < mails.length; i++) {
-        let id = mails[i].children[0].children[0].href
-        let from = mails[i].children[0].innerText
-        let subject = mails[i].children[1].innerText
-        inbox.push([id, from, subject]) }
-    return inbox }"""
-PARSE_GUERRILLAMAIL_INBOX = """
-var email_list = document.getElementById('email_list').children
-var inbox = []
-for(var i=0; i < email_list.length-1; i++) {
-    var mail = email_list[i].children
-    var from = mail[1].innerText
-    var subject = mail[2].innerText
-    var mail_id = mail[0].children[0].value
-    inbox.push([mail_id, from, subject])
-}
-return inbox
-"""
-GET_GUERRILLAMAIL_DOMAINS = """
-var domains_options = document.getElementById('gm-host-select').options
-var domains = [] 
-for(var i=0; i < domains_options.length-1; i++) {
-    domains.push(domains_options[i].value)
-}
-return domains
-"""
 
 colorama.init()
 
@@ -90,14 +76,16 @@ def console_log(text='', logger_type=None, fill_text=None):
                 ni = i
                 break
             print()
-        if logger_type.fill_text and fill_text is None:
-            fill_text = True
-        if logger_type.fill_text and fill_text:
+        if fill_text is None:
+            fill_text = logger_type.fill_text
+        if fill_text:
             print(logger_type.data + ' ' + logger_type.color + text[ni:] + colorama.Style.RESET_ALL)
         else:
             print(logger_type.data + ' ' + text[ni:])
     else:
         print(text)
+
+from .WebDriverInstaller import GOOGLE_CHROME, MICROSOFT_EDGE, MOZILLA_FIREFOX
 
 def clear_console():
     if os.name == 'nt':
@@ -133,10 +121,11 @@ def dataGenerator(length, only_numbers=False):
         data = [random.choice(string.digits) for _ in range(length)]
     else: # password
         length += random.randint(1, 10)
-        data = [ # 1 uppercase letter, 1 number, 1 special character
+        data = [ # 1 uppercase & lowercase letter, 1 number, 1 special character
             random.choice(string.ascii_uppercase),
+            random.choice(string.ascii_lowercase),
             random.choice(string.digits),
-            random.choice(string.punctuation)
+            random.choice("""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~""")
         ]
         characters = string.ascii_letters + string.digits + string.punctuation
         data += [random.choice(characters) for _ in range(length-3)]
@@ -144,16 +133,19 @@ def dataGenerator(length, only_numbers=False):
     return ''.join(data)
 
 def initSeleniumWebDriver(browser_name: str, webdriver_path = None, browser_path = '', headless=True):
+    if browser_path is None:
+        browser_path = ''
+    console_log(f'{colorama.Fore.LIGHTMAGENTA_EX}-- Browsers Initializer --{colorama.Fore.RESET}\n')
     if os.name == 'posix': # For Linux
         if sys.platform.startswith('linux'):
-            console_log(f'Initializing {browser_name}-webdriver for Linux', INFO)
+            console_log(f'Initializing {browser_name} for Linux', INFO)
         elif sys.platform == "darwin":
-            console_log(f'Initializing {browser_name}-webdriver for macOS', INFO)
+            console_log(f'Initializing {browser_name} for macOS', INFO)
     elif os.name == 'nt':
-        console_log(f'Initializing {browser_name}-webdriver for Windows', INFO)
+        console_log(f'Initializing {browser_name} for Windows', INFO)
     driver_options = None
     driver = None
-    if browser_name.lower() == 'chrome':
+    if browser_name == GOOGLE_CHROME:
         driver_options = ChromeOptions()
         driver_options.binary_location = browser_path
         driver_options.add_experimental_option('excludeSwitches', ['enable-logging'])
@@ -166,7 +158,7 @@ def initSeleniumWebDriver(browser_name: str, webdriver_path = None, browser_path
             driver_options.add_argument('--disable-dev-shm-usage')
         try:
             driver = Chrome(options=driver_options, service=ChromeService(executable_path=webdriver_path))
-        except Exception as E:
+        except Exception as e:
             if traceback.format_exc().find('only supports') != -1: # Fix for downloaded chrome update
                 browser_path = traceback.format_exc().split('path')[-1].split('Stacktrace')[0].strip()
                 if 'new_chrome.exe' in os.listdir(browser_path[:-10]):
@@ -175,10 +167,24 @@ def initSeleniumWebDriver(browser_name: str, webdriver_path = None, browser_path
                     driver_options.binary_location = browser_path
                     driver = Chrome(options=driver_options, service=ChromeService(executable_path=webdriver_path))
             else:
-                raise E
-    elif browser_name.lower() == 'firefox':
-        driver_options = FirefoxOptions()
+                raise e
+    elif browser_name == MICROSOFT_EDGE:
+        driver_options = EdgeOptions()
+        driver_options.use_chromium = True
         driver_options.binary_location = browser_path
+        driver_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        driver_options.add_argument("--log-level=3")
+        driver_options.add_argument("--lang=en-US")
+        if headless:
+            driver_options.add_argument('--headless')
+        if os.name == 'posix': # For Linux
+            driver_options.add_argument('--no-sandbox')
+            driver_options.add_argument('--disable-dev-shm-usage')
+        driver = Edge(options=driver_options, service=EdgeService(executable_path=webdriver_path))
+    elif browser_name == MOZILLA_FIREFOX:
+        driver_options = FirefoxOptions()
+        if browser_path.strip() != '':
+            driver_options.binary_location = browser_path
         driver_options.set_preference('intl.accept_languages', 'en-US')
         if headless:
             driver_options.add_argument('--headless')
@@ -192,21 +198,6 @@ def initSeleniumWebDriver(browser_name: str, webdriver_path = None, browser_path
             pass
         os.environ['TMPDIR'] = (os.getcwd()+'/firefox_tmp').replace('\\', '/')
         driver = Firefox(options=driver_options, service=FirefoxService(executable_path=webdriver_path))
-    elif browser_name.lower() == 'edge':
-        driver_options = EdgeOptions()
-        driver_options.use_chromium = True
-        driver_options.binary_location = browser_path
-        driver_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-        driver_options.add_argument("--log-level=3")
-        driver_options.add_argument("--lang=en-US")
-        if headless:
-            driver_options.add_argument('--headless')
-        if os.name == 'posix': # For Linux
-            driver_options.add_argument('--no-sandbox')
-            driver_options.add_argument('--disable-dev-shm-usage')
-        driver = Edge(options=driver_options, service=EdgeService(executable_path=webdriver_path))
-    #driver.set_window_position(0, 0)
-    #driver.set_window_size(640, 640)
     return driver
 
 def parseToken(email_obj, driver=None, eset_business=False, delay=DEFAULT_DELAY, max_iter=DEFAULT_MAX_ITER):
@@ -214,10 +205,16 @@ def parseToken(email_obj, driver=None, eset_business=False, delay=DEFAULT_DELAY,
     if email_obj.class_name == 'custom':
         while True:
             activated_href = input(f'\n[  {colorama.Fore.YELLOW}INPT{colorama.Fore.RESET}  ] {colorama.Fore.CYAN}Enter the link to activate your account, it will come to the email address you provide: {colorama.Fore.RESET}').strip()
-            if activated_href is not None:
-                match = re.search(r'token=[a-zA-Z\d:/-]*', activated_href)
+            if activated_href != '':
+                if eset_business:
+                    match = re.search(r'activation\/[a-zA-Z0-9-]+', activated_href)
+                else:
+                    match = re.search(r'token=[a-zA-Z\d:/-]*', activated_href)
                 if match is not None:
-                    token = match.group()[6:]
+                    if eset_business:
+                        token = match.group()[11:]
+                    else:
+                        token = match.group()[6:]
                     if len(token) == 36:
                         return token
             console_log('Incorrect link syntax', ERROR)
@@ -225,54 +222,114 @@ def parseToken(email_obj, driver=None, eset_business=False, delay=DEFAULT_DELAY,
         if email_obj.class_name == '1secmail':
             json = email_obj.read_email()
             if json != []:
-                message = json[-1]
-                if eset_business and message['subject'].find('activation') != -1:
-                    activated_href = email_obj.get_message(message['id'])['body']
-                elif message['from'].find('product.eset.com') != -1:
-                    activated_href = email_obj.get_message(message['id'])['body']
+                for message in json:
+                    if eset_business and message['subject'].find('ESET PROTECT Hub') != -1:
+                        activated_href = email_obj.get_message(message['id'])['body']
+                    elif message['from'].find('product.eset.com') != -1:
+                        activated_href = email_obj.get_message(message['id'])['body']
         elif email_obj.class_name == 'developermail':
             messages = email_obj.get_messages()
             if messages is not None:
                 message = messages[-1]
-                if eset_business and message['subject'].find('activation') != -1:
+                if eset_business and message['subject'].find('ESET PROTECT Hub') != -1:
                     activated_href = message['body']
                 elif message['from'].find('product.eset.com') != -1:
                     activated_href = message['body']
-        elif email_obj.class_name == 'hi2in':
-            email_obj.open_inbox()
-            try:
-                if eset_business:
-                    activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://eba.eset.com')]").get_attribute('href')
-                else:
-                    activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://login.eset.com')]").get_attribute('href')
-            except:
-                pass
-        elif email_obj.class_name in ['guerrillamail', '10minutemail']:
+        elif email_obj.class_name in ['guerrillamail', 'mailticking']:
             inbox = email_obj.parse_inbox()
             for mail in inbox:
                 mail_id, mail_from, mail_subject = mail
-                if mail_from.find('product.eset.com') != -1 or mail_subject.find('activation') != -1:
+                if mail_from.find('product.eset.com') != -1 or mail_from.find('ESET HOME') != -1 or mail_subject.find('ESET PROTECT Hub') != -1:
                     email_obj.open_mail(mail_id)
+                    if email_obj.class_name == 'mailticking':
+                        time.sleep(1.5)
                     try:
                         if eset_business:
-                            activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://eba.eset.com')]").get_attribute('href') 
+                            activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://protecthub.eset.com')]").get_attribute('href') 
                         else:
                             activated_href = driver.find_element('xpath', "//a[starts-with(@href, 'https://login.eset.com')]").get_attribute('href')
                     except:
                         pass
-        elif email_obj.class_name == 'tempmail':
-            email_obj.auth()
-            messages = email_obj.get_messages()
-            try:
-                for message in messages:
-                    if message["from"].find("product.eset.com") != -1 or message["subject"].find("activation") != -1:
-                        activated_href = email_obj.get_message(message["_id"])["bodyHtml"]
-            except:
-                pass
         if activated_href is not None:
-            match = re.search(r'token=[a-zA-Z\d:/-]*', activated_href)
+            if eset_business:
+                match = re.search(r'activation\/[a-zA-Z0-9-]+', activated_href)
+            else:
+                match = re.search(r'token=[a-zA-Z\d:/-]*', activated_href)
             if match is not None:
-                token = match.group()[6:]
-                return token
+                if eset_business:
+                    token = match.group()[11:]
+                else:
+                    token = match.group()[6:]
+                if len(token) == 36:
+                    return token
         time.sleep(delay)
-    raise RuntimeError('Token retrieval error!!!')
+    raise RuntimeError('Token retrieval error, try again later or change the Email API!!!')
+
+def parseEPHKey(email_obj, driver=None, delay=DEFAULT_DELAY, max_iter=DEFAULT_MAX_ITER):
+    for _ in range(max_iter):
+        license_data = None
+        if email_obj.class_name == 'developermail':
+            messages = email_obj.get_messages()
+            if messages is not None:
+                for message in messages:
+                    if message['subject'].find('Thank you for purchasing') != -1:
+                        license_data = message['body']
+                        break
+        if email_obj.class_name == 'mailticking':
+            inbox = email_obj.parse_inbox()
+            for mail in inbox:
+                mail_id, mail_from, mail_subject = mail
+                if mail_subject.find('Thank you for purchasing') != -1:
+                    email_obj.open_mail(mail_id)
+                    time.sleep(3)
+                    license_data = email_obj.driver.page_source
+                    break
+        if license_data is not None:
+            license_data = str(license_data)
+            license_key = re.search(r'([A-Z0-9]){4}-([A-Z0-9]){4}-([A-Z0-9]){4}-([A-Z0-9]){4}-([A-Z0-9]){4}', license_data).group()
+            license_id = re.search(r'[A-Z0-9]{3}-[A-Z0-9]{3}-[A-Z0-9]{3}', license_data).group()
+            license_out_date = re.findall(r'\d\d.\d\d.\d\d\d\d', license_data)[-1]
+            return license_key, license_out_date, license_id
+        time.sleep(delay)
+    raise RuntimeError('ESET ProtectHub data waiting time has been exceeded!!!')
+
+def parseVPNCodes(email_obj, driver=None, delay=DEFAULT_DELAY, max_iter=DEFAULT_MAX_ITER):
+    for _ in range(max_iter):
+        data = None
+        if email_obj.class_name == '1secmail':
+            json = email_obj.read_email()
+            if json != []:
+                for message in json:
+                    if message['subject'].find('VPN - Setup instructions') != -1:
+                        data = email_obj.get_message(message['id'])['body']
+        elif email_obj.class_name == 'developermail':
+            messages = email_obj.get_messages()
+            if messages is not None:
+                for message in messages:
+                    if message['subject'].find('VPN - Setup instructions') != -1:
+                        data = message['body']
+        elif email_obj.class_name in ['guerrillamail', 'mailticking']:
+            inbox = email_obj.parse_inbox()
+            for mail in inbox:
+                mail_id, mail_from, mail_subject = mail
+                if mail_subject.find('VPN - Setup instructions') != -1:
+                    email_obj.open_mail(mail_id)
+                    if email_obj.class_name == 'mailticking':
+                        time.sleep(1.5)
+                        try:
+                            data = str(driver.execute_script(f'return {GET_EBCN}("email-content")[0].innerHTML'))
+                        except:
+                            pass
+                    elif email_obj.class_name == 'guerrillamail':
+                        try:
+                            data = str(driver.execute_script(f'return {GET_EBCN}("email_body")[0].innerHTML'))
+                        except:
+                            pass
+                    else:
+                        data = driver.page_source
+        if data is not None:
+            match = re.findall(r'[A-Z0-9]{10}', data)
+            if match is not None and len(match) == 10:
+                return match
+        time.sleep(delay)
+    raise RuntimeError('VPN Codes retrieval error, try again later or change the Email API!!!')

@@ -1,5 +1,5 @@
 from .SharedTools import console_log, INFO, OK, ERROR, WARN
-from rich.progress import Progress
+from .ProgressBar import ProgressBar, DEFAULT_RICH_STYLE
 
 import argparse
 import requests
@@ -13,7 +13,7 @@ def parse_update_json(json_path='', from_main=False):
     if json_path == '':
         url = 'https://api.github.com/repos/rzc0d3r/ESET-KeyGen/releases'
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=3)
             update_json = response.json()
             try:
                 if update_json.get('message') is not None:
@@ -35,7 +35,6 @@ def parse_update_json(json_path='', from_main=False):
                     f_update_json[release['name']]['assets'][asset['name']] = asset['browser_download_url']
             return f_update_json
         except requests.RequestException as e:
-            console_log(f"Failed to fetch update JSON: {e}", ERROR)
             return None
     else:
         try:
@@ -51,19 +50,17 @@ def download_file(url, filename):
         response = requests.get(url, stream=True)
         total_length = response.headers.get('content-length')
 
-        if total_length is None:  # No content length header
-            #console_log("Cannot determine the size of the download. Downloading in one go...", WARN)
+        if total_length is None: # No content length header
             with open(filename, 'wb') as f:
                 f.write(response.content)
         else:
-            total_length = int(total_length)
-            with Progress() as progress:
-                task = progress.add_task("          ", total=total_length)
-                with open(filename, 'wb') as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:  # filter out keep-alive new chunks
-                            f.write(chunk)
-                            progress.update(task, advance=len(chunk))
+            task = ProgressBar(int(total_length), '           ', DEFAULT_RICH_STYLE)
+            with open(filename, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk: # filter out keep-alive new chunks
+                        f.write(chunk)
+                        task.update(len(chunk))
+                        task.render()
         return True
     except Exception as e:
         console_log(f"Error downloading file: {e}", ERROR)
