@@ -148,5 +148,5 @@ jobs:
           elseif ($KEY -ne 0) {
               python3 main.py --chrome $KEY_TYPE --email-api $MAIL --skip-webdriver-menu --skip-update-check --no-logo --disable-progress-bar --repeat $KEY
               echo "`nKey:" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-              Get-Content -Path ./*KEYS.txt | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+              
           }
